@@ -1583,6 +1583,7 @@ const html = `<!DOCTYPE html>
           history: {}, // questionId: { timesAnswered: 0, correct: 0, lastResult: true/false }
           starred: {}, // questionId: true
           notes: {}, // questionId: "note text"
+          topicProgress: {},
           completedExams: []
         };
         try {
@@ -1595,6 +1596,14 @@ const html = `<!DOCTYPE html>
 
       saveState() {
         try {
+          const session = this.currentSession;
+          if (session?.topic) {
+            this.state.topicProgress[session.topic] = {
+              currentQIndex: this.currentQIndex,
+              userAnswers: session.userAnswers,
+              checked: session.checked
+            };
+          }
           localStorage.setItem(this.storageKey, JSON.stringify(this.state));
         } catch(e) {
           console.error('Storage error:', e);
@@ -1692,11 +1701,15 @@ const html = `<!DOCTYPE html>
         const topicsGrid = document.getElementById('topicsGrid');
         topicsGrid.innerHTML = '';
         Object.keys(topicCounts).sort().forEach(tag => {
+          const progress = this.state.topicProgress[tag];
+          const checkedCount = progress
+            ? Object.values(progress.checked).filter(Boolean).length
+            : 0;
           const item = document.createElement('div');
           item.className = 'topic-item';
           item.innerHTML = \`
             <span class="topic-name">\${tag}</span>
-            <span class="topic-count">\${topicCounts[tag]} Qs</span>
+            <span class="topic-count">\${checkedCount === topicCounts[tag] ? 'Completed' : \`\${checkedCount}/\${topicCounts[tag]} studied\`}</span>
           \`;
           item.onclick = () => this.startTopicPractice(tag);
           topicsGrid.appendChild(item);
@@ -1721,7 +1734,7 @@ const html = `<!DOCTYPE html>
 
       startTopicPractice(topic) {
         const pool = this.questions.filter(q => q.tags.includes(topic));
-        this.initSession(pool, 'study', \`Topic: \${topic} (\${pool.length} Qs)\`);
+        this.initSession(pool, 'study', \`Topic: \${topic} (\${pool.length} Qs)\`, 0, topic);
       }
 
       startMistakesPractice() {
@@ -1749,24 +1762,28 @@ const html = `<!DOCTYPE html>
         this.initSession(pool, 'exam', title, 90 * 60); // 90 mins
       }
 
-      initSession(questionList, mode, title, durationSeconds = 0) {
+      initSession(questionList, mode, title, durationSeconds = 0, topic = null) {
         if (!questionList || questionList.length === 0) {
           alert('No questions match this criteria.');
           return;
         }
 
+        const savedProgress = topic ? this.state.topicProgress[topic] : null;
         this.currentSession = {
           mode: mode, // 'study' or 'exam'
           title: title,
           questions: questionList,
-          userAnswers: {}, // index: [selected letters]
-          checked: {}, // index: boolean (in study mode)
+          topic,
+          userAnswers: savedProgress?.userAnswers || {}, // index: [selected letters]
+          checked: savedProgress?.checked || {}, // index: boolean (in study mode)
           startTime: Date.now(),
           duration: durationSeconds,
           flagged: {} // index: boolean
         };
 
-        this.currentQIndex = 0;
+        this.currentQIndex = savedProgress
+          ? Math.min(Math.max(savedProgress.currentQIndex || 0, 0), questionList.length - 1)
+          : 0;
 
         // UI setup
         document.getElementById('sessionTitleBadge').textContent = mode === 'exam' ? 'Exam Simulator' : 'Study Mode';
@@ -1965,6 +1982,7 @@ const html = `<!DOCTYPE html>
         }
 
         s.userAnswers[this.currentQIndex] = currentSelected;
+        this.saveState();
         this.renderCurrentQuestion();
         this.updatePaletteButton(this.currentQIndex);
       }
@@ -2008,6 +2026,7 @@ const html = `<!DOCTYPE html>
       prevQuestion() {
         if (this.currentQIndex > 0) {
           this.currentQIndex--;
+          this.saveState();
           this.renderCurrentQuestion();
         }
       }
@@ -2015,6 +2034,7 @@ const html = `<!DOCTYPE html>
       nextQuestion() {
         if (this.currentSession && this.currentQIndex < this.currentSession.questions.length - 1) {
           this.currentQIndex++;
+          this.saveState();
           this.renderCurrentQuestion();
         }
       }
@@ -2022,6 +2042,7 @@ const html = `<!DOCTYPE html>
       jumpToQuestion(index) {
         if (this.currentSession && index >= 0 && index < this.currentSession.questions.length) {
           this.currentQIndex = index;
+          this.saveState();
           this.renderCurrentQuestion();
         }
       }
@@ -2475,4 +2496,3 @@ const html = `<!DOCTYPE html>
 
 fs.writeFileSync('e:/project/csa_mock_exam/index.html', html, 'utf8');
 console.log('Successfully generated index.html! File size:', (html.length / 1024).toFixed(1), 'KB');
-
