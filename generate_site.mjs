@@ -234,6 +234,19 @@ const html = `<!DOCTYPE html>
       padding: 1.5rem 1.25rem 3rem;
     }
 
+    .site-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--border-color);
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 0.8rem;
+    }
+
+    .site-footer strong {
+      color: var(--text-main);
+      font-weight: 700;
+    }
+
     .view-section {
       display: none;
     }
@@ -472,8 +485,9 @@ const html = `<!DOCTYPE html>
       border: 1px solid var(--border-color);
       background: var(--bg-card-subtle);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
+      gap: 0.5rem;
       cursor: pointer;
     }
 
@@ -484,6 +498,31 @@ const html = `<!DOCTYPE html>
 
     .topic-name {
       font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .topic-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+
+    .topic-progress {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .topic-session-stats {
+      display: none;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      padding: 0.75rem 1rem;
+      background: var(--bg-card-subtle);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      color: var(--text-muted);
+      font-size: 0.8rem;
       font-weight: 600;
     }
 
@@ -1387,6 +1426,7 @@ const html = `<!DOCTYPE html>
       <div class="session-body">
         <!-- QUESTION MAIN -->
         <div class="question-card">
+          <div id="topicSessionStats" class="topic-session-stats" aria-live="polite"></div>
           <div class="q-top-row">
             <div class="q-tags" id="qTagsContainer">
               <!-- tags -->
@@ -1542,6 +1582,10 @@ const html = `<!DOCTYPE html>
     </div>
 
   </main>
+
+  <footer class="site-footer">
+    ✦ Created by <strong>CodeWidDar</strong> ✦
+  </footer>
 
   <!-- CONFIRM EXIT MODAL -->
   <div class="modal-overlay" id="confirmModal">
@@ -1736,14 +1780,25 @@ const html = `<!DOCTYPE html>
         topicsGrid.innerHTML = '';
         Object.keys(topicCounts).sort().forEach(tag => {
           const progress = this.state.topicProgress[tag];
-          const checkedCount = progress
-            ? Object.values(progress.checked).filter(Boolean).length
-            : 0;
+          const checkedIndexes = progress
+            ? Object.keys(progress.checked).filter(index => progress.checked[index])
+            : [];
+          const checkedCount = checkedIndexes.length;
+          const topicQuestions = this.questions.filter(q => q.tags.includes(tag));
+          const correctCount = checkedIndexes.filter(index => {
+            const question = topicQuestions[index];
+            return question && this.isQuestionAnswerCorrect(question, progress.userAnswers[index] || []);
+          }).length;
+          const mistakeCount = checkedCount - correctCount;
+          const accuracy = checkedCount ? Math.round((correctCount / checkedCount) * 100) : 0;
           const item = document.createElement('div');
           item.className = 'topic-item';
           item.innerHTML = \`
-            <span class="topic-name">\${tag}</span>
-            <span class="topic-count">\${checkedCount === topicCounts[tag] ? 'Completed' : \`\${checkedCount}/\${topicCounts[tag]} studied\`}</span>
+            <span class="topic-details">
+              <span class="topic-name">\${tag}</span>
+              <span class="topic-progress">\${checkedCount}/\${topicCounts[tag]} studied · \${correctCount} correct · \${mistakeCount} mistakes</span>
+            </span>
+            <span class="topic-count">\${checkedCount ? \`\${accuracy}%\` : '—'}</span>
           \`;
           item.onclick = () => this.startTopicPractice(tag);
           topicsGrid.appendChild(item);
@@ -1879,6 +1934,7 @@ const html = `<!DOCTYPE html>
         const s = this.currentSession;
         if (!s) return;
 
+        this.updateTopicSessionStats();
         const q = s.questions[this.currentQIndex];
         const total = s.questions.length;
 
@@ -1999,6 +2055,30 @@ const html = `<!DOCTYPE html>
         document.getElementById('questionNoteInput').value = note;
 
         this.updatePaletteButton(this.currentQIndex);
+      }
+
+      updateTopicSessionStats() {
+        const stats = document.getElementById('topicSessionStats');
+        const session = this.currentSession;
+        if (!stats) return;
+        if (!session?.topic) {
+          stats.style.display = 'none';
+          return;
+        }
+
+        const checkedIndexes = Object.keys(session.checked).filter(index => session.checked[index]);
+        const correct = checkedIndexes.filter(index =>
+          this.isQuestionAnswerCorrect(session.questions[index], session.userAnswers[index] || [])
+        ).length;
+        const mistakes = checkedIndexes.length - correct;
+        const accuracy = checkedIndexes.length ? Math.round((correct / checkedIndexes.length) * 100) : 0;
+        stats.innerHTML = \`
+          <span>\${checkedIndexes.length}/\${session.questions.length} studied</span>
+          <span>\${correct} correct</span>
+          <span>\${mistakes} mistakes</span>
+          <span>\${accuracy}% accuracy</span>
+        \`;
+        stats.style.display = 'flex';
       }
 
       handleOptionClick(letter, question) {
