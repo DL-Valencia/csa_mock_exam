@@ -1222,6 +1222,9 @@ const html = `<!DOCTYPE html>
           <button class="btn btn-primary" style="padding: 0.75rem 1.5rem; font-size: 0.95rem;" onclick="app.startExam(60, 'full-exam', 'Real CSA Exam (60 Qs)')">
             ⚡ Start 60-Q Practice Exam
           </button>
+          <button class="btn btn-secondary" id="resumeSessionBtn" style="display: none; margin-top: 0.5rem; width: 100%;" onclick="app.resumeLastSession()">
+            Resume previous session
+          </button>
         </div>
       </div>
 
@@ -1584,6 +1587,7 @@ const html = `<!DOCTYPE html>
           starred: {}, // questionId: true
           notes: {}, // questionId: "note text"
           topicProgress: {},
+          savedSession: null,
           completedExams: []
         };
         try {
@@ -1604,7 +1608,22 @@ const html = `<!DOCTYPE html>
               checked: session.checked
             };
           }
+          if (session) {
+            this.state.savedSession = {
+              mode: session.mode,
+              title: session.title,
+              questions: session.questions,
+              topic: session.topic,
+              userAnswers: session.userAnswers,
+              checked: session.checked,
+              currentQIndex: this.currentQIndex,
+              duration: session.duration,
+              timeRemaining: this.timeRemaining,
+              savedAt: Date.now()
+            };
+          }
           localStorage.setItem(this.storageKey, JSON.stringify(this.state));
+          this.updateResumeButton();
         } catch(e) {
           console.error('Storage error:', e);
         }
@@ -1621,8 +1640,23 @@ const html = `<!DOCTYPE html>
         // Render Dashboard
         this.renderDashboard();
         this.populateBankFilters();
+        window.addEventListener('pagehide', () => this.saveState());
 
         console.log('CSA Exam Hub initialized with', this.questions.length, 'questions.');
+      }
+
+      updateResumeButton() {
+        const button = document.getElementById('resumeSessionBtn');
+        const session = this.state.savedSession;
+        if (!button) return;
+        button.style.display = session?.questions?.length ? 'inline-flex' : 'none';
+        if (session?.title) button.textContent = \`Resume: \${session.title}\`;
+      }
+
+      resumeLastSession() {
+        const session = this.state.savedSession;
+        if (!session?.questions?.length) return;
+        this.initSession(session.questions, session.mode, session.title, session.duration, session.topic, session);
       }
 
       toggleTheme() {
@@ -1714,6 +1748,7 @@ const html = `<!DOCTYPE html>
           item.onclick = () => this.startTopicPractice(tag);
           topicsGrid.appendChild(item);
         });
+        this.updateResumeButton();
       }
 
       /* SESSION START HELPERS */
@@ -1762,7 +1797,7 @@ const html = `<!DOCTYPE html>
         this.initSession(pool, 'exam', title, 90 * 60); // 90 mins
       }
 
-      initSession(questionList, mode, title, durationSeconds = 0, topic = null) {
+      initSession(questionList, mode, title, durationSeconds = 0, topic = null, restore = null) {
         if (!questionList || questionList.length === 0) {
           alert('No questions match this criteria.');
           return;
@@ -1774,15 +1809,16 @@ const html = `<!DOCTYPE html>
           title: title,
           questions: questionList,
           topic,
-          userAnswers: savedProgress?.userAnswers || {}, // index: [selected letters]
-          checked: savedProgress?.checked || {}, // index: boolean (in study mode)
+          userAnswers: restore?.userAnswers || savedProgress?.userAnswers || {}, // index: [selected letters]
+          checked: restore?.checked || savedProgress?.checked || {}, // index: boolean (in study mode)
           startTime: Date.now(),
           duration: durationSeconds,
           flagged: {} // index: boolean
         };
 
-        this.currentQIndex = savedProgress
-          ? Math.min(Math.max(savedProgress.currentQIndex || 0, 0), questionList.length - 1)
+        const savedIndex = restore?.currentQIndex ?? savedProgress?.currentQIndex ?? 0;
+        this.currentQIndex = savedProgress || restore
+          ? Math.min(Math.max(savedIndex, 0), questionList.length - 1)
           : 0;
 
         // UI setup
@@ -1792,7 +1828,9 @@ const html = `<!DOCTYPE html>
         const timerEl = document.getElementById('examTimer');
         if (mode === 'exam') {
           timerEl.style.display = 'flex';
-          this.timeRemaining = durationSeconds;
+          this.timeRemaining = restore
+            ? Math.max(0, restore.timeRemaining - Math.floor((Date.now() - restore.savedAt) / 1000))
+            : durationSeconds;
           this.startTimer();
           document.getElementById('checkBtn').style.display = 'none';
           document.getElementById('finishExamBtn').style.display = 'inline-flex';
@@ -1806,6 +1844,7 @@ const html = `<!DOCTYPE html>
         this.showView('session');
         this.renderCurrentQuestion();
         this.renderPalette();
+        this.saveState();
       }
 
       startTimer() {
@@ -2458,6 +2497,8 @@ const html = `<!DOCTYPE html>
           'Reset All Progress?',
           'This will clear your answer history, test stats, bookmarks, and notes. This cannot be undone.',
           () => {
+            clearInterval(this.timerInterval);
+            this.currentSession = null;
             localStorage.removeItem(this.storageKey);
             this.state = this.loadState();
             this.renderDashboard();
